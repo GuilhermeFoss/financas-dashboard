@@ -243,10 +243,10 @@ function render(data) {
         ${pessoasListHtml(data.quemEuDevo, false)}
       </div>
 
-      <div class="section">
-        <h2>🤝 Saldos com pessoas (total acumulado)</h2>
+      ${ehMesAtual ? `<div class="section">
+        <h2>🤝 Saldos com pessoas (total acumulado, todos os meses)</h2>
         ${saldosHtml}
-      </div>
+      </div>` : ''}
 
       <div class="section">
         <h2>💳 Por banco — ${esc(data.mesNome)}</h2>
