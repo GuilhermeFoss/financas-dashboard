@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Finanças">
+<meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<title>Finanças</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { background: #0b0f14; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #e6edf3;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .page { max-width: 480px; margin: 0 auto; padding: 20px 16px 40px; }
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .header-titles h1 { font-size: 22px; font-weight: 700; }
+  .updated { color: #7d8590; font-size: 11px; margin-top: 2px; }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 50%; background: #161b22; border: 1px solid #30363d;
+    display: flex; align-items: center; justify-content: center; font-size: 16px; color: #7d8590;
+    text-decoration: none; flex-shrink: 0; cursor: pointer;
+  }
+  .header-btns { display: flex; gap: 8px; }
+  .alert {
+    background: #3d2b0a; border: 1px solid #9e6a03; color: #f0b429;
+    padding: 12px 16px; border-radius: 12px; font-size: 13px; margin-bottom: 14px; text-align: center;
+  }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 16px; padding: 14px; min-width: 0; }
+  .card.highlight { grid-column: 1 / -1; background: linear-gradient(135deg, #17352a, #10241d); border-color: #2ea043; padding: 18px; }
+  .card-label { font-size: 10.5px; color: #7d8590; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-value { font-size: 26px; font-weight: 700; line-height: 1.15; word-break: break-word; }
+  .card.highlight .card-value { font-size: 32px; }
+  .card-value.small { font-size: 19px; }
+  .section { margin-bottom: 26px; }
+  .section h2 { font-size: 13px; margin-bottom: 12px; color: #c9d1d9; font-weight: 600; }
+  .cat-row { margin-bottom: 11px; }
+  .cat-label { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; margin-bottom: 4px; }
+  .cat-label span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-label span:last-child { flex-shrink: 0; color: #c9d1d9; }
+  .cat-bar-track { background: #21262d; border-radius: 6px; height: 7px; overflow: hidden; }
+  .cat-bar-fill { background: linear-gradient(90deg, #58a6ff, #79c0ff); height: 100%; border-radius: 6px; }
+  .saldo-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 11px 0; border-bottom: 1px solid #21262d; font-size: 13.5px; }
+  .saldo-row:last-child { border-bottom: none; }
+  .saldo-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pos { color: #3fb950; font-weight: 600; flex-shrink: 0; }
+  .neg { color: #f85149; font-weight: 600; flex-shrink: 0; }
+  .muted { color: #7d8590; font-size: 13px; }
+  .banco-block { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .banco-header { display: flex; justify-content: space-between; font-size: 14px; font-weight: 600; }
+  .banco-devido { display: flex; justify-content: space-between; font-size: 12.5px; color: #7d8590; padding: 6px 0 0 10px; }
+  .month-nav { display: flex; align-items: center; justify-content: space-between; background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 10px 14px; margin-bottom: 18px; font-size: 13px; }
+  .month-nav button { background: none; border: none; color: #58a6ff; font-weight: 600; font-size: 13px; padding: 4px 8px; cursor: pointer; font-family: inherit; }
+  .month-nav button:disabled { color: #30363d; cursor: default; }
+  .month-nav span { color: #c9d1d9; font-weight: 600; text-transform: capitalize; }
+  .total-line { font-size: 13px; color: #7d8590; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid #21262d; }
+  .total-line strong { color: #e6edf3; font-size: 15px; }
+  .loading { text-align: center; padding: 60px 0; color: #7d8590; }
+  .setup { max-width: 420px; margin: 80px auto; padding: 0 20px; text-align: center; }
+  .setup h1 { font-size: 20px; margin-bottom: 8px; }
+  .setup p { color: #7d8590; font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+  .setup input {
+    width: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px 14px;
+    color: #e6edf3; font-size: 13px; margin-bottom: 12px; font-family: inherit;
+  }
+  .setup button {
+    width: 100%; background: #2ea043; border: none; border-radius: 10px; padding: 12px 14px;
+    color: white; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  .setup .error { color: #f85149; font-size: 12px; margin-top: 10px; }
+
+  @media (max-width: 360px) {
+    .card.highlight .card-value { font-size: 28px; }
+    .card-value { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+<script>
+const STORAGE_KEY = 'financas_dashboard_url';
+let monthOffset = 0;
+
+function formatBRL(n) {
+  n = Number(n) || 0;
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s === null || s === undefined ? '' : String(s);
+  return d.innerHTML;
+}
+
+function getSavedUrl() {
+  return localStorage.getItem(STORAGE_KEY);
+}
+
+function renderSetup(errorMsg) {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="setup">
+      <h1>💰 Configurar Finanças</h1>
+      <p>Cole a URL completa do dashboard — a mesma que você usa no widget/atalho (com <code>?token=...</code>).</p>
+      <input id="url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec?token=...">
+      <button onclick="saveUrl()">Salvar</button>
+      ${errorMsg ? `<p class="error">${esc(errorMsg)}</p>` : ''}
+    </div>`;
+}
+
+function saveUrl() {
+  const val = document.getElementById('url-input').value.trim();
+  if (!val || !val.startsWith('http')) {
+    renderSetup('Cole a URL completa, começando com https://');
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, val);
+  loadDashboard();
+}
+
+function buildFetchUrl(offset) {
+  const saved = getSavedUrl();
+  const u = new URL(saved);
+  u.searchParams.set('format', 'json');
+  u.searchParams.set('month', offset);
+  return u.toString();
+}
+
+async function loadDashboard() {
+  const saved = getSavedUrl();
+  if (!saved) { renderSetup(); return; }
+
+  const app = document.getElementById('app');
+  app.innerHTML = '<div class="loading">Carregando…</div>';
+
+  let data;
+  try {
+    const res = await fetch(buildFetchUrl(monthOffset));
+    data = await res.json();
+    if (data.error) throw new Error(data.error);
+  } catch (e) {
+    renderSetup('Erro ao buscar dados: ' + e.message + ' — confira a URL (o token pode ter mudado).');
+    return;
+  }
+
+  render(data);
+}
+
+function render(data) {
+  const app = document.getElementById('app');
+  const ehMesAtual = data.monthOffset === 0;
+
+  const topCategorias = data.categorias || [];
+  const maxCategoria = topCategorias.length ? Math.max(...topCategorias.map(c => c.valor)) : 1;
+  const categoriasHtml = topCategorias.map(c => {
+    const pct = Math.max(4, Math.round((c.valor / maxCategoria) * 100));
+    return `<div class="cat-row"><div class="cat-label"><span>${esc(c.nome)}</span><span>R$ ${formatBRL(c.valor)}</span></div><div class="cat-bar-track"><div class="cat-bar-fill" style="width:${pct}%"></div></div></div>`;
+  }).join('') || '<p class="muted">Sem compras neste mês.</p>';
+
+  function pessoasListHtml(lista, positivo) {
+    if (!lista || lista.length === 0) return '<p class="muted">Ninguém, por enquanto. 🎉</p>';
+    const total = lista.reduce((sum, p) => sum + p.valor, 0);
+    const linhas = lista.map(p =>
+      `<div class="saldo-row"><span>${esc(p.nome)}</span><span class="${positivo ? 'pos' : 'neg'}">R$ ${formatBRL(p.valor)}</span></div>`
+    ).join('');
+    return `<div class="total-line">Total: <strong>R$ ${formatBRL(total)}</strong></div>${linhas}`;
+  }
+
+  const saldos = data.saldos || [];
+  const saldosHtml = saldos.length === 0
+    ? '<p class="muted">Ninguém deve nada no momento. 🎉</p>'
+    : saldos.map(p => {
+        const positivo = p.saldo > 0;
+        return `<div class="saldo-row"><span>${positivo ? '🟢' : '🔴'} ${esc(p.nome)}</span><span class="${positivo ? 'pos' : 'neg'}">${positivo ? 'te deve' : 'você deve'} R$ ${formatBRL(Math.abs(p.saldo))}</span></div>`;
+      }).join('');
+
+  const bancos = data.bancos || [];
+  const bancosHtml = bancos.length === 0
+    ? '<p class="muted">Sem movimentação neste mês.</p>'
+    : bancos.map(b => {
+        const devidoHtml = (b.devidoPor || []).map(p =>
+          `<div class="banco-devido"><span>${esc(p.nome)}</span><span>R$ ${formatBRL(p.valor)}</span></div>`
+        ).join('');
+        return `<div class="banco-block"><div class="banco-header"><span>${esc(b.banco)}</span><span>R$ ${formatBRL(b.total)}</span></div>${devidoHtml}</div>`;
+      }).join('');
+
+  app.innerHTML = `
+    <div class="page">
+      <div class="header">
+        <div class="header-titles">
+          <h1>💰 Finanças</h1>
+          <p class="updated">Atualizado ${esc(data.atualizado)}</p>
+        </div>
+        <div class="header-btns">
+          <a class="icon-btn" onclick="loadDashboard()">↻</a>
+          <a class="icon-btn" onclick="reconfigure()">⚙️</a>
+        </div>
+      </div>
+
+      <div class="month-nav">
+        <button onclick="changeMonth(-1)">← anterior</button>
+        <span>${ehMesAtual ? 'mês atual' : esc(data.mesNome)}</span>
+        <button onclick="changeMonth(1)">seguinte →</button>
+      </div>
+
+      ${data.pendentes > 0 ? `<div class="alert">⏳ ${data.pendentes} compra${data.pendentes > 1 ? 's' : ''} aguardando revisão</div>` : ''}
+
+      <div class="cards">
+        <div class="card highlight">
+          <div class="card-label">Total líquido do mês</div>
+          <div class="card-value">R$ ${formatBRL(data.totalLiquidoMes)}</div>
+        </div>
+        <div class="card">
+          <div class="card-label">${ehMesAtual && data.gastoOntem !== null ? 'Gasto de ontem' : 'Total bruto do mês'}</div>
+          <div class="card-value small">R$ ${formatBRL(ehMesAtual && data.gastoOntem !== null ? data.gastoOntem : data.totalBrutoMes)}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>🏆 Por categoria — ${esc(data.mesNome)}</h2>
+        ${categoriasHtml}
+      </div>
+
+      <div class="section">
+        <h2>🟢 Quem me deve — ${esc(data.mesNome)}</h2>
+        ${pessoasListHtml(data.quemMeDeve, true)}
+      </div>
+
+      <div class="section">
+        <h2>🔴 Quem eu devo — ${esc(data.mesNome)}</h2>
+        ${pessoasListHtml(data.quemEuDevo, false)}
+      </div>
+
+      <div class="section">
+        <h2>🤝 Saldos com pessoas (total acumulado)</h2>
+        ${saldosHtml}
+      </div>
+
+      <div class="section">
+        <h2>💳 Por banco — ${esc(data.mesNome)}</h2>
+        ${bancosHtml}
+      </div>
+    </div>`;
+}
+
+function changeMonth(delta) {
+  monthOffset += delta;
+  loadDashboard();
+}
+
+function reconfigure() {
+  localStorage.removeItem(STORAGE_KEY);
+  renderSetup();
+}
+
+loadDashboard();
+</script>
+</body>
+</html>
