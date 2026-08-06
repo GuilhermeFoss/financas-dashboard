@@ -148,10 +148,30 @@ function renderSetup(errorMsg) {
     </div>`;
 }
 
+// Valida a URL colada e dá uma mensagem específica pro problema mais comum (token esquecido),
+// em vez de deixar o erro genérico e críptico do `new URL()` do navegador aparecer pro usuário
+// (no Safari: "The string did not match the expected pattern.").
+function validateDashboardUrl(val) {
+  if (!val || !val.startsWith('http')) {
+    return 'Cole a URL completa, começando com https://';
+  }
+  let parsed;
+  try {
+    parsed = new URL(val);
+  } catch {
+    return 'Essa URL não é válida — confira se copiou ela inteira, sem cortar nada.';
+  }
+  if (!parsed.searchParams.get('token')) {
+    return 'Falta o "?token=..." no final da URL — sem ele o Worker recusa a requisição. Pegue a URL completa (com token) no widget/atalho, ou no .secrets.local do projeto no Mac.';
+  }
+  return null;
+}
+
 function saveUrl() {
   const val = document.getElementById('url-input').value.trim();
-  if (!val || !val.startsWith('http')) {
-    renderSetup('Cole a URL completa, começando com https://');
+  const erro = validateDashboardUrl(val);
+  if (erro) {
+    renderSetup(erro);
     return;
   }
   localStorage.setItem(STORAGE_KEY, val);
@@ -162,7 +182,12 @@ function saveUrl() {
 // mesma URL configurada (que aponta pra /api/dashboard) pra chamar /api/transacoes também.
 function buildFetchUrl(offset, path) {
   const saved = getSavedUrl();
-  const u = new URL(saved);
+  let u;
+  try {
+    u = new URL(saved);
+  } catch {
+    throw new Error('A URL salva ficou inválida. Toque em ⚙️ e configure de novo.');
+  }
   if (path) u.pathname = path;
   u.searchParams.set('format', 'json');
   u.searchParams.set('month', offset);
