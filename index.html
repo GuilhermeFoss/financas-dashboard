@@ -20,9 +20,8 @@
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
   }
-  .page { max-width: 480px; margin: 0 auto; padding: 20px 16px 40px; }
+  .page { max-width: 480px; margin: 0 auto; padding: 20px 16px 100px; }
   .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
   .header-titles h1 { font-size: 22px; font-weight: 700; }
   .updated { color: #7d8590; font-size: 11px; margin-top: 2px; }
@@ -80,6 +79,28 @@
   }
   .setup .error { color: #f85149; font-size: 12px; margin-top: 10px; }
 
+  .tx-row { padding: 10px 0; border-bottom: 1px solid #21262d; }
+  .tx-row:last-child { border-bottom: none; }
+  .tx-line1 { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+  .tx-line1 .tx-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tx-line1 .tx-valor { flex-shrink: 0; font-weight: 600; }
+  .tx-line2 { margin-top: 2px; font-size: 12px; }
+  .tx-pending { color: #f0b429; }
+
+  .bottom-nav {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+    display: flex; justify-content: space-around;
+    background: #161b22; border-top: 1px solid #30363d;
+    padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+  }
+  .bottom-nav button {
+    background: none; border: none; color: #7d8590; font-family: inherit; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 4px 18px; font-size: 10.5px;
+  }
+  .bottom-nav button .icon { font-size: 19px; }
+  .bottom-nav button.active { color: #58a6ff; }
+
   @media (max-width: 360px) {
     .card.highlight .card-value { font-size: 28px; }
     .card-value { font-size: 22px; }
@@ -92,10 +113,17 @@
 <script>
 const STORAGE_KEY = 'financas_dashboard_url';
 let monthOffset = 0;
+let activeTab = 'resumo'; // 'resumo' | 'transacoes' | 'pessoas'
 
 function formatBRL(n) {
   n = Number(n) || 0;
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatDataCurta(iso) {
+  if (!iso) return '';
+  const [, m, d] = iso.split('-');
+  return `${d}/${m}`;
 }
 
 function esc(s) {
@@ -114,7 +142,7 @@ function renderSetup(errorMsg) {
     <div class="setup">
       <h1>💰 Configurar Finanças</h1>
       <p>Cole a URL completa do dashboard — a mesma que você usa no widget/atalho (com <code>?token=...</code>).</p>
-      <input id="url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec?token=...">
+      <input id="url-input" type="text" placeholder="https://financas-worker..../api/dashboard?token=...">
       <button onclick="saveUrl()">Salvar</button>
       ${errorMsg ? `<p class="error">${esc(errorMsg)}</p>` : ''}
     </div>`;
@@ -127,41 +155,83 @@ function saveUrl() {
     return;
   }
   localStorage.setItem(STORAGE_KEY, val);
-  loadDashboard();
+  loadActiveTab();
 }
 
-function buildFetchUrl(offset) {
+// path opcional: troca só o pathname da URL salva, mantendo origem+token — permite reusar a
+// mesma URL configurada (que aponta pra /api/dashboard) pra chamar /api/transacoes também.
+function buildFetchUrl(offset, path) {
   const saved = getSavedUrl();
   const u = new URL(saved);
+  if (path) u.pathname = path;
   u.searchParams.set('format', 'json');
   u.searchParams.set('month', offset);
   return u.toString();
 }
 
-async function loadDashboard() {
+async function fetchJson(url) {
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
+async function loadActiveTab() {
   const saved = getSavedUrl();
   if (!saved) { renderSetup(); return; }
 
   const app = document.getElementById('app');
   app.innerHTML = '<div class="loading">Carregando…</div>';
 
-  let data;
   try {
-    const res = await fetch(buildFetchUrl(monthOffset));
-    data = await res.json();
-    if (data.error) throw new Error(data.error);
+    if (activeTab === 'resumo') {
+      const data = await fetchJson(buildFetchUrl(monthOffset));
+      renderShell(data, renderResumoContent(data));
+    } else {
+      const data = await fetchJson(buildFetchUrl(monthOffset, '/api/transacoes'));
+      const content = activeTab === 'transacoes' ? renderTransacoesContent(data) : renderPessoasContent(data);
+      renderShell(data, content);
+    }
   } catch (e) {
     renderSetup('Erro ao buscar dados: ' + e.message + ' — confira a URL (o token pode ter mudado).');
-    return;
   }
-
-  render(data);
 }
 
-function render(data) {
+// Casca comum a todas as abas: cabeçalho, navegação de mês, conteúdo da aba, menu inferior.
+function renderShell(data, contentHtml) {
   const app = document.getElementById('app');
   const ehMesAtual = data.monthOffset === 0;
 
+  app.innerHTML = `
+    <div class="page">
+      <div class="header">
+        <div class="header-titles">
+          <h1>💰 Finanças</h1>
+          <p class="updated">Atualizado ${esc(data.atualizado)}</p>
+        </div>
+        <div class="header-btns">
+          <a class="icon-btn" onclick="loadActiveTab()">↻</a>
+          <a class="icon-btn" onclick="reconfigure()">⚙️</a>
+        </div>
+      </div>
+
+      <div class="month-nav">
+        <button onclick="changeMonth(-1)">← anterior</button>
+        <span>${ehMesAtual ? 'mês atual' : esc(data.mesNome)}</span>
+        <button onclick="changeMonth(1)">seguinte →</button>
+      </div>
+
+      ${contentHtml}
+    </div>
+
+    <div class="bottom-nav">
+      <button class="${activeTab === 'resumo' ? 'active' : ''}" onclick="switchTab('resumo')"><span class="icon">📊</span>Resumo</button>
+      <button class="${activeTab === 'transacoes' ? 'active' : ''}" onclick="switchTab('transacoes')"><span class="icon">🧾</span>Transações</button>
+      <button class="${activeTab === 'pessoas' ? 'active' : ''}" onclick="switchTab('pessoas')"><span class="icon">🤝</span>Pessoas</button>
+    </div>`;
+}
+
+function renderResumoContent(data) {
   const topCategorias = data.categorias || [];
   const maxCategoria = topCategorias.length ? Math.max(...topCategorias.map(c => c.valor)) : 1;
   const categoriasHtml = topCategorias.map(c => {
@@ -178,6 +248,7 @@ function render(data) {
     return `<div class="total-line">Total: <strong>R$ ${formatBRL(total)}</strong></div>${linhas}`;
   }
 
+  const ehMesAtual = data.monthOffset === 0;
   const saldos = data.saldos || [];
   const saldosHtml = saldos.length === 0
     ? '<p class="muted">Ninguém deve nada no momento. 🎉</p>'
@@ -196,25 +267,7 @@ function render(data) {
         return `<div class="banco-block"><div class="banco-header"><span>${esc(b.banco)}</span><span>R$ ${formatBRL(b.total)}</span></div>${devidoHtml}</div>`;
       }).join('');
 
-  app.innerHTML = `
-    <div class="page">
-      <div class="header">
-        <div class="header-titles">
-          <h1>💰 Finanças</h1>
-          <p class="updated">Atualizado ${esc(data.atualizado)}</p>
-        </div>
-        <div class="header-btns">
-          <a class="icon-btn" onclick="loadDashboard()">↻</a>
-          <a class="icon-btn" onclick="reconfigure()">⚙️</a>
-        </div>
-      </div>
-
-      <div class="month-nav">
-        <button onclick="changeMonth(-1)">← anterior</button>
-        <span>${ehMesAtual ? 'mês atual' : esc(data.mesNome)}</span>
-        <button onclick="changeMonth(1)">seguinte →</button>
-      </div>
-
+  return `
       ${data.pendentes > 0 ? `<div class="alert">⏳ ${data.pendentes} compra${data.pendentes > 1 ? 's' : ''} aguardando revisão</div>` : ''}
 
       <div class="cards">
@@ -251,13 +304,78 @@ function render(data) {
       <div class="section">
         <h2>💳 Por banco — ${esc(data.mesNome)}</h2>
         ${bancosHtml}
-      </div>
-    </div>`;
+      </div>`;
+}
+
+// Lista crua das compras do mês, ordenada por data (a API já manda ordenado).
+function renderTransacoesContent(data) {
+  const txs = data.transacoes || [];
+  if (!txs.length) {
+    return `<div class="section"><p class="muted">Nenhuma compra neste mês.</p></div>`;
+  }
+  const linhas = txs.map(tx => {
+    const parcelaLabel = tx.parcelaTotal > 1 ? ` <span class="muted">(${tx.parcelaAtual}/${tx.parcelaTotal})</span>` : '';
+    const pendingBadge = tx.status === 'Pending Review' ? ' <span class="tx-pending">⏳</span>' : '';
+    return `
+      <div class="tx-row">
+        <div class="tx-line1">
+          <span class="tx-item">${esc(tx.item)}${parcelaLabel}${pendingBadge}</span>
+          <span class="tx-valor">R$ ${formatBRL(tx.valorTotal)}</span>
+        </div>
+        <div class="tx-line2 muted">${formatDataCurta(tx.data)} · ${esc(tx.categoria)} · ${esc(tx.banco)}</div>
+      </div>`;
+  }).join('');
+  return `<div class="section"><h2>🧾 Compras — ${esc(data.mesNome)}</h2>${linhas}</div>`;
+}
+
+// Agrupa as compras do mês por pessoa (Quem Racha) — cada grupo mostra o saldo líquido daquela
+// pessoa no mês e a lista das compras que compõem esse saldo.
+function renderPessoasContent(data) {
+  const txs = data.transacoes || [];
+  const porPessoa = {};
+  txs.forEach(tx => {
+    if (!tx.quemRacha) return;
+    porPessoa[tx.quemRacha] ??= { meDeve: 0, euDevo: 0, itens: [] };
+    const grupo = porPessoa[tx.quemRacha];
+    if (tx.pagoPorMim) {
+      const valor = tx.valorTotal - tx.meuValor;
+      grupo.meDeve += valor;
+      grupo.itens.push({ ...tx, valorRacha: valor, sentido: 'meDeve' });
+    } else {
+      grupo.euDevo += tx.meuValor;
+      grupo.itens.push({ ...tx, valorRacha: tx.meuValor, sentido: 'euDevo' });
+    }
+  });
+
+  const nomes = Object.keys(porPessoa).sort();
+  if (!nomes.length) {
+    return `<div class="section"><p class="muted">Nenhuma compra rachada neste mês.</p></div>`;
+  }
+
+  return nomes.map(nome => {
+    const grupo = porPessoa[nome];
+    const saldoLiquido = grupo.meDeve - grupo.euDevo;
+    const itensHtml = grupo.itens.map(tx => `
+      <div class="saldo-row">
+        <span>${esc(tx.item)} <span class="muted">(${formatDataCurta(tx.data)})</span></span>
+        <span class="${tx.sentido === 'meDeve' ? 'pos' : 'neg'}">R$ ${formatBRL(tx.valorRacha)}</span>
+      </div>`).join('');
+    return `
+      <div class="section">
+        <h2>🤝 ${esc(nome)} — <span class="${saldoLiquido >= 0 ? 'pos' : 'neg'}">${saldoLiquido >= 0 ? 'te deve' : 'você deve'} R$ ${formatBRL(Math.abs(saldoLiquido))}</span></h2>
+        ${itensHtml}
+      </div>`;
+  }).join('');
+}
+
+function switchTab(tab) {
+  activeTab = tab;
+  loadActiveTab();
 }
 
 function changeMonth(delta) {
   monthOffset += delta;
-  loadDashboard();
+  loadActiveTab();
 }
 
 function reconfigure() {
@@ -265,7 +383,7 @@ function reconfigure() {
   renderSetup();
 }
 
-loadDashboard();
+loadActiveTab();
 </script>
 </body>
 </html>
