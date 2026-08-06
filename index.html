@@ -101,6 +101,23 @@
   .bottom-nav button .icon { font-size: 19px; }
   .bottom-nav button.active { color: #58a6ff; }
 
+  .chart-wrap { position: relative; }
+  .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart-tooltip {
+    position: absolute; transform: translate(-50%, -100%); pointer-events: none;
+    background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 6px 10px;
+    font-size: 12px; line-height: 1.6; white-space: nowrap; opacity: 0; transition: opacity 0.1s;
+  }
+  .chart-tooltip.visible { opacity: 1; }
+  .chart-tooltip .t-valor { font-weight: 700; color: #e6edf3; }
+  .chart-tooltip .t-mes { color: #7d8590; }
+  .chart-tooltip .t-key { display: inline-block; width: 10px; border-top: 2px solid; margin-right: 4px; vertical-align: middle; }
+  .chart-point { cursor: pointer; }
+  .chart-legend { display: flex; gap: 14px; margin-bottom: 10px; font-size: 12px; color: #c9d1d9; }
+  .chart-legend span { display: flex; align-items: center; gap: 5px; }
+  .chart-legend i { display: inline-block; width: 12px; height: 2px; border-radius: 1px; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+
   @media (max-width: 360px) {
     .card.highlight .card-value { font-size: 28px; }
     .card-value { font-size: 22px; }
@@ -113,7 +130,8 @@
 <script>
 const STORAGE_KEY = 'financas_dashboard_url';
 let monthOffset = 0;
-let activeTab = 'resumo'; // 'resumo' | 'transacoes' | 'pessoas'
+let activeTab = 'resumo'; // 'resumo' | 'transacoes' | 'pessoas' | 'evolucao'
+const EVOLUCAO_MESES = 6;
 
 function formatBRL(n) {
   n = Number(n) || 0;
@@ -194,6 +212,21 @@ function buildFetchUrl(offset, path) {
   return u.toString();
 }
 
+// /api/evolucao não usa mês nenhum — é sempre uma janela rolante dos últimos N meses.
+function buildEvolucaoUrl(meses) {
+  const saved = getSavedUrl();
+  let u;
+  try {
+    u = new URL(saved);
+  } catch {
+    throw new Error('A URL salva ficou inválida. Toque em ⚙️ e configure de novo.');
+  }
+  u.pathname = '/api/evolucao';
+  u.searchParams.delete('month');
+  u.searchParams.set('meses', meses);
+  return u.toString();
+}
+
 async function fetchJson(url) {
   const res = await fetch(url);
   const data = await res.json();
@@ -212,6 +245,9 @@ async function loadActiveTab() {
     if (activeTab === 'resumo') {
       const data = await fetchJson(buildFetchUrl(monthOffset));
       renderShell(data, renderResumoContent(data));
+    } else if (activeTab === 'evolucao') {
+      const data = await fetchJson(buildEvolucaoUrl(EVOLUCAO_MESES));
+      renderShell(data, renderEvolucaoContent(data));
     } else {
       const data = await fetchJson(buildFetchUrl(monthOffset, '/api/transacoes'));
       const content = activeTab === 'transacoes' ? renderTransacoesContent(data) : renderPessoasContent(data);
@@ -226,6 +262,9 @@ async function loadActiveTab() {
 function renderShell(data, contentHtml) {
   const app = document.getElementById('app');
   const ehMesAtual = data.monthOffset === 0;
+  // A aba Evolução não é "de um mês" — é sempre uma janela rolante dos últimos N meses, então a
+  // navegação ← anterior/seguinte → (que pertence ao conceito de "mês selecionado") não se aplica.
+  const showMonthNav = activeTab !== 'evolucao';
 
   app.innerHTML = `
     <div class="page">
@@ -240,11 +279,11 @@ function renderShell(data, contentHtml) {
         </div>
       </div>
 
-      <div class="month-nav">
+      ${showMonthNav ? `<div class="month-nav">
         <button onclick="changeMonth(-1)">← anterior</button>
         <span>${ehMesAtual ? 'mês atual' : esc(data.mesNome)}</span>
         <button onclick="changeMonth(1)">seguinte →</button>
-      </div>
+      </div>` : ''}
 
       ${contentHtml}
     </div>
@@ -253,6 +292,7 @@ function renderShell(data, contentHtml) {
       <button class="${activeTab === 'resumo' ? 'active' : ''}" onclick="switchTab('resumo')"><span class="icon">📊</span>Resumo</button>
       <button class="${activeTab === 'transacoes' ? 'active' : ''}" onclick="switchTab('transacoes')"><span class="icon">🧾</span>Transações</button>
       <button class="${activeTab === 'pessoas' ? 'active' : ''}" onclick="switchTab('pessoas')"><span class="icon">🤝</span>Pessoas</button>
+      <button class="${activeTab === 'evolucao' ? 'active' : ''}" onclick="switchTab('evolucao')"><span class="icon">📈</span>Evolução</button>
     </div>`;
 }
 
@@ -392,6 +432,133 @@ function renderPessoasContent(data) {
       </div>`;
   }).join('');
 }
+
+function mesAbrev(mesNome) {
+  return (mesNome || '').split(' ')[0].slice(0, 3);
+}
+
+// Paleta categórica de referência (skill de dataviz), par validado — hue fixa por série, nunca
+// trocada: slot 1 azul = Fixo, slot 2 laranja = Variável.
+const COR_FIXO = '#3987e5';
+const COR_VARIAVEL = '#d95926';
+
+// Gráfico de 2 linhas (Fixo × Variável) em SVG puro (sem lib) dos últimos N meses. Toque num mês
+// mostra as duas séries daquele ponto (tooltip) — cada linha já termina rotulada com seu valor.
+function renderEvolucaoContent(data) {
+  const meses = data.meses || [];
+  if (meses.length < 2) {
+    return `<div class="section"><h2>📈 Fixo × Variável</h2><p class="muted">Ainda não há meses suficientes pra montar o gráfico.</p></div>`;
+  }
+
+  const n = meses.length;
+  const mediaFixo = meses.reduce((s, m) => s + m.fixoLiquido, 0) / n;
+  const mediaVariavel = meses.reduce((s, m) => s + m.variavelLiquido, 0) / n;
+  const maxValor = Math.max(...meses.map(m => m.fixoLiquido), ...meses.map(m => m.variavelLiquido), 1);
+
+  const W = 320, H = 168, padL = 8, padR = 8, padT = 30, padB = 22;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const xAt = i => padL + (plotW * i) / (n - 1);
+  const yAt = v => padT + plotH - (v / (maxValor * 1.15)) * plotH;
+  const baseY = (padT + plotH).toFixed(1);
+
+  function serieHtml(campo, cor) {
+    const pts = meses.map((m, i) => ({ x: xAt(i), y: yAt(m[campo]), valor: m[campo] }));
+    const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const dots = pts.map((p, i) => `
+      <g class="chart-point" onclick="showChartTooltip(event, ${i})">
+        <circle cx="${p.x}" cy="${p.y}" r="11" fill="transparent"></circle>
+        <circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${cor}" stroke="#0b0f14" stroke-width="2"></circle>
+      </g>`).join('');
+    const ultimo = pts[n - 1];
+    // text-anchor="end": o último ponto é sempre o mais à direita — ancorar pela direita evita
+    // que o rótulo (largo, tipo "R$ 2.112,92") estoure a borda do gráfico.
+    const valorFinal = `<text x="${(ultimo.x + padR).toFixed(1)}" y="${Math.max(ultimo.y - 8, 11)}" text-anchor="end" font-size="10.5" font-weight="700" fill="${cor}">R$ ${formatBRL(ultimo.valor)}</text>`;
+    return { linePath, dots, valorFinal, pts };
+  }
+
+  const fixo = serieHtml('fixoLiquido', COR_FIXO);
+  const variavel = serieHtml('variavelLiquido', COR_VARIAVEL);
+  const labelsHtml = meses.map((m, i) =>
+    `<text x="${xAt(i)}" y="${H - 6}" text-anchor="middle" font-size="9" fill="#7d8590">${esc(mesAbrev(m.mesNome))}</text>`
+  ).join('');
+
+  // Guardado pro tooltip (por mês, não por série — toque em qualquer ponto daquele mês mostra
+  // as duas séries juntas, "um tooltip, todas as séries").
+  window.__evolucaoPontos = meses.map((m, i) => ({ ...m, cx: xAt(i), cy: yAt(Math.max(m.fixoLiquido, m.variavelLiquido)) }));
+
+  return `
+    <div class="cards" style="margin-bottom:18px;">
+      <div class="card">
+        <div class="card-label"><span class="dot" style="background:${COR_FIXO};"></span>Fixo médio/mês</div>
+        <div class="card-value small">R$ ${formatBRL(mediaFixo)}</div>
+      </div>
+      <div class="card">
+        <div class="card-label"><span class="dot" style="background:${COR_VARIAVEL};"></span>Variável médio/mês</div>
+        <div class="card-value small">R$ ${formatBRL(mediaVariavel)}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>📈 Fixo × Variável — últimos ${n} meses</h2>
+      <div class="chart-legend">
+        <span><i style="background:${COR_FIXO};"></i>Fixo (assinaturas)</span>
+        <span><i style="background:${COR_VARIAVEL};"></i>Variável (compras)</span>
+      </div>
+      <div class="chart-wrap" id="chart-wrap">
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+          <line x1="${padL}" y1="${baseY}" x2="${W - padR}" y2="${baseY}" stroke="#21262d" stroke-width="1"></line>
+          <path d="${fixo.linePath}" fill="none" stroke="${COR_FIXO}" stroke-width="2"></path>
+          <path d="${variavel.linePath}" fill="none" stroke="${COR_VARIAVEL}" stroke-width="2"></path>
+          ${fixo.valorFinal}
+          ${variavel.valorFinal}
+          ${fixo.dots}
+          ${variavel.dots}
+          ${labelsHtml}
+        </svg>
+        <div class="chart-tooltip" id="chart-tooltip"></div>
+      </div>
+      <p class="muted" style="margin-top:8px;">Toque num ponto pra ver os dois valores daquele mês.</p>
+    </div>`;
+}
+
+// Posiciona o tooltip compartilhado em cima do ponto tocado (coordenadas do SVG escaladas pro
+// tamanho real renderizado, já que o viewBox é fixo mas o SVG estica pra largura da tela). Mostra
+// as DUAS séries daquele mês juntas — "um tooltip só, todas as séries", não uma por linha.
+function showChartTooltip(evt, idx) {
+  evt.stopPropagation();
+  const pontos = window.__evolucaoPontos;
+  const wrap = document.getElementById('chart-wrap');
+  const tooltip = document.getElementById('chart-tooltip');
+  if (!pontos || !pontos[idx] || !wrap || !tooltip) return;
+
+  const p = pontos[idx];
+  const svg = wrap.querySelector('svg');
+  const svgRect = svg.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  const scaleX = svgRect.width / 320;
+  const scaleY = svgRect.height / 168;
+
+  tooltip.innerHTML = `<span class="t-mes">${esc(p.mesNome)}</span><br>` +
+    `<span class="t-key" style="border-color:${COR_FIXO};"></span><span class="t-valor">R$ ${formatBRL(p.fixoLiquido)}</span> fixo<br>` +
+    `<span class="t-key" style="border-color:${COR_VARIAVEL};"></span><span class="t-valor">R$ ${formatBRL(p.variavelLiquido)}</span> variável`;
+  tooltip.classList.add('visible');
+
+  const top = (p.cy * scaleY) + (svgRect.top - wrapRect.top) - 12;
+  let left = (p.cx * scaleX) + (svgRect.left - wrapRect.left);
+  // Trava horizontalmente pra não vazar do container — o tooltip é centralizado no ponto por
+  // padrão (transform: translateX(-50%)), o que estoura a borda quando o ponto é o primeiro/último.
+  const half = tooltip.offsetWidth / 2;
+  const margem = 4;
+  left = Math.min(Math.max(left, half + margem), wrapRect.width - half - margem);
+
+  tooltip.style.left = left + 'px';
+  tooltip.style.top = top + 'px';
+}
+
+document.addEventListener('click', () => {
+  const tooltip = document.getElementById('chart-tooltip');
+  if (tooltip) tooltip.classList.remove('visible');
+});
 
 function switchTab(tab) {
   activeTab = tab;
