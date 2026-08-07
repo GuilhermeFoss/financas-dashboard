@@ -138,7 +138,7 @@
 const STORAGE_KEY = 'financas_dashboard_url';
 let monthOffset = 0;
 let activeTab = 'resumo'; // 'resumo' | 'transacoes' | 'pessoas' | 'evolucao'
-let evolucaoMeses = 6; // 6 ou 12 — filtro da aba Evolução
+let evolucaoPeriodo = 'h1'; // 'h1' | 'h2' | 'ano' — período fixo do ano corrente, aba Evolução
 
 function formatBRL(n) {
   n = Number(n) || 0;
@@ -219,8 +219,9 @@ function buildFetchUrl(offset, path) {
   return u.toString();
 }
 
-// /api/evolucao não usa mês nenhum — é sempre os próximos N meses a partir do atual.
-function buildEvolucaoUrl(meses) {
+// /api/evolucao não usa mês nenhum — é sempre um período fixo do ano corrente (1º semestre,
+// 2º semestre ou ano inteiro), não uma janela que muda conforme os dias passam.
+function buildEvolucaoUrl(periodo) {
   const saved = getSavedUrl();
   let u;
   try {
@@ -230,7 +231,7 @@ function buildEvolucaoUrl(meses) {
   }
   u.pathname = '/api/evolucao';
   u.searchParams.delete('month');
-  u.searchParams.set('meses', meses);
+  u.searchParams.set('periodo', periodo);
   return u.toString();
 }
 
@@ -253,7 +254,7 @@ async function loadActiveTab() {
       const data = await fetchJson(buildFetchUrl(monthOffset));
       renderShell(data, renderResumoContent(data));
     } else if (activeTab === 'evolucao') {
-      const data = await fetchJson(buildEvolucaoUrl(evolucaoMeses));
+      const data = await fetchJson(buildEvolucaoUrl(evolucaoPeriodo));
       renderShell(data, renderEvolucaoContent(data));
     } else {
       const data = await fetchJson(buildFetchUrl(monthOffset, '/api/transacoes'));
@@ -482,19 +483,26 @@ function mesAbrev(mesNome) {
 const COR_FIXO = '#3987e5';
 const COR_VARIAVEL = '#d95926';
 
-// Dois gráficos de 1 linha cada (SVG puro, sem lib), dos PRÓXIMOS N meses a partir do atual —
-// separados porque são naturezas diferentes de gasto, não dois jeitos de ver a mesma coisa:
+const PERIODO_LABELS = { h1: '1º semestre', h2: '2º semestre', ano: 'ano inteiro' };
+
+// Dois gráficos de 1 linha cada (SVG puro, sem lib), de um período FIXO do ano corrente —
+// 1º semestre (jan-jun), 2º semestre (jul-dez) ou ano inteiro — não uma janela rolante que muda
+// de mês pra mês; o mesmo período mostra sempre o mesmo range de calendário, não importa quando
+// você olha. Separados porque são naturezas diferentes de gasto, não dois jeitos de ver a mesma
+// coisa:
 // - Fixo: assinaturas ativas + compras já parceladas (Parcela Total > 1). Cada parcela já existe
 //   como linha própria no mês em que cai, então esse gráfico sobe sozinho quando você lança uma
 //   compra nova e cai sozinho quando uma parcela termina — sem precisar reconstruir nada.
-// - Variável: só compras à vista (sem parcelamento). Em meses futuros tende a começar zerado,
-//   já que uma compra à vista só existe depois de acontecer.
+// - Variável: só compras à vista (sem parcelamento). Em meses futuros do período (ainda não
+//   vividos) tende a começar zerado, já que uma compra à vista só existe depois de acontecer.
 function renderEvolucaoContent(data) {
   const meses = data.meses || [];
+  const periodoLabel = PERIODO_LABELS[evolucaoPeriodo] || PERIODO_LABELS.h1;
   const filtroHtml = `
     <div class="filter-toggle">
-      <button class="${evolucaoMeses === 6 ? 'active' : ''}" onclick="setEvolucaoMeses(6)">Próximos 6 meses</button>
-      <button class="${evolucaoMeses === 12 ? 'active' : ''}" onclick="setEvolucaoMeses(12)">Próximos 12 meses</button>
+      <button class="${evolucaoPeriodo === 'h1' ? 'active' : ''}" onclick="setEvolucaoPeriodo('h1')">1º Semestre</button>
+      <button class="${evolucaoPeriodo === 'h2' ? 'active' : ''}" onclick="setEvolucaoPeriodo('h2')">2º Semestre</button>
+      <button class="${evolucaoPeriodo === 'ano' ? 'active' : ''}" onclick="setEvolucaoPeriodo('ano')">Ano Inteiro</button>
     </div>`;
 
   if (meses.length < 2) {
@@ -502,6 +510,7 @@ function renderEvolucaoContent(data) {
   }
 
   const n = meses.length;
+  const mediaFixo = meses.reduce((s, m) => s + m.fixoTotal, 0) / n;
   const mediaVariavel = meses.reduce((s, m) => s + m.variavel, 0) / n;
 
   const fixoChart = buildEvolucaoChart(meses, 'fixoTotal', COR_FIXO, 'fixo');
@@ -512,8 +521,8 @@ function renderEvolucaoContent(data) {
     ${filtroHtml}
     <div class="cards" style="margin-bottom:18px;">
       <div class="card">
-        <div class="card-label"><span class="dot" style="background:${COR_FIXO};"></span>Fixo deste mês</div>
-        <div class="card-value small">R$ ${formatBRL(meses[0].fixoTotal)}</div>
+        <div class="card-label"><span class="dot" style="background:${COR_FIXO};"></span>Fixo médio/mês</div>
+        <div class="card-value small">R$ ${formatBRL(mediaFixo)}</div>
       </div>
       <div class="card">
         <div class="card-label"><span class="dot" style="background:${COR_VARIAVEL};"></span>Variável médio/mês</div>
@@ -522,15 +531,15 @@ function renderEvolucaoContent(data) {
     </div>
 
     <div class="section">
-      <h2>📌 Fixo — parcelas + assinaturas — próximos ${n} meses</h2>
+      <h2>📌 Fixo — parcelas + assinaturas — ${periodoLabel}</h2>
       ${fixoChart.svgHtml}
       <p class="muted" style="margin-top:8px;">Assinaturas ativas + compras já parceladas. Sobe quando você lança uma compra nova, cai sozinho quando uma parcela termina. Toque num ponto pra ver o valor.</p>
     </div>
 
     <div class="section">
-      <h2>🔀 Variável — compras à vista — próximos ${n} meses</h2>
+      <h2>🔀 Variável — compras à vista — ${periodoLabel}</h2>
       ${variavelChart.svgHtml}
-      <p class="muted" style="margin-top:8px;">Só compras à vista, sem parcelamento. Meses futuros começam zerados até você lançar algo. Toque num ponto pra ver o valor.</p>
+      <p class="muted" style="margin-top:8px;">Só compras à vista, sem parcelamento. Meses do período ainda não vividos começam zerados até você lançar algo. Toque num ponto pra ver o valor.</p>
     </div>`;
 }
 
@@ -554,8 +563,9 @@ function buildEvolucaoChart(meses, campo, cor, idSuffix) {
     </g>`).join('');
   const primeiro = pts[0];
   const ultimo = pts[n - 1];
-  // "Gostaria de saber o valor que começarei o mês" — o rótulo do primeiro ponto (mês atual) é
-  // o que responde isso diretamente, por isso fica junto do rótulo do último ponto, não só ele.
+  // Rótulo no primeiro E no último mês do período (não só no último) — o período é fixo agora,
+  // então o primeiro ponto pode ser passado, presente ou futuro dependendo de quando você olha;
+  // mostrar os dois extremos deixa a tendência do período legível de cara.
   const labelPrimeiro = `<text x="${primeiro.x.toFixed(1)}" y="${Math.max(primeiro.y - 8, 11)}" text-anchor="start" font-size="10.5" font-weight="700" fill="${cor}">R$ ${formatBRL(primeiro.valor)}</text>`;
   const labelUltimo = `<text x="${(ultimo.x + padR).toFixed(1)}" y="${Math.max(ultimo.y - 8, 11)}" text-anchor="end" font-size="10.5" font-weight="700" fill="${cor}">R$ ${formatBRL(ultimo.valor)}</text>`;
   const labelsHtml = meses.map((m, i) =>
@@ -578,8 +588,8 @@ function buildEvolucaoChart(meses, campo, cor, idSuffix) {
   return { svgHtml, pontos: pts };
 }
 
-function setEvolucaoMeses(n) {
-  evolucaoMeses = n;
+function setEvolucaoPeriodo(periodo) {
+  evolucaoPeriodo = periodo;
   loadActiveTab();
 }
 
