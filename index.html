@@ -118,9 +118,9 @@
   .chart-legend i { display: inline-block; width: 12px; height: 2px; border-radius: 1px; }
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 
-  .filter-toggle { display: flex; gap: 8px; margin-bottom: 16px; }
+  .filter-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
   .filter-toggle button {
-    flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 9px;
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 9px;
     color: #7d8590; font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
   }
   .filter-toggle button.active { color: #58a6ff; border-color: #58a6ff; }
@@ -138,7 +138,7 @@
 const STORAGE_KEY = 'financas_dashboard_url';
 let monthOffset = 0;
 let activeTab = 'resumo'; // 'resumo' | 'transacoes' | 'pessoas' | 'evolucao'
-let evolucaoMeses = 6; // 6 ou 12 — filtro da aba Evolução
+let evolucaoPeriodo = 'h1'; // 'h1' | 'h2' | 'ano' — período fixo do ano corrente, aba Evolução
 
 function formatBRL(n) {
   n = Number(n) || 0;
@@ -219,8 +219,9 @@ function buildFetchUrl(offset, path) {
   return u.toString();
 }
 
-// /api/evolucao não usa mês nenhum — é sempre os próximos N meses a partir do atual.
-function buildEvolucaoUrl(meses) {
+// /api/evolucao não usa mês nenhum — é sempre um período fixo do ano corrente (1º semestre,
+// 2º semestre ou ano inteiro), não uma janela que muda conforme os dias passam.
+function buildEvolucaoUrl(periodo) {
   const saved = getSavedUrl();
   let u;
   try {
@@ -230,7 +231,7 @@ function buildEvolucaoUrl(meses) {
   }
   u.pathname = '/api/evolucao';
   u.searchParams.delete('month');
-  u.searchParams.set('meses', meses);
+  u.searchParams.set('periodo', periodo);
   return u.toString();
 }
 
@@ -253,7 +254,7 @@ async function loadActiveTab() {
       const data = await fetchJson(buildFetchUrl(monthOffset));
       renderShell(data, renderResumoContent(data));
     } else if (activeTab === 'evolucao') {
-      const data = await fetchJson(buildEvolucaoUrl(evolucaoMeses));
+      const data = await fetchJson(buildEvolucaoUrl(evolucaoPeriodo));
       renderShell(data, renderEvolucaoContent(data));
     } else {
       const data = await fetchJson(buildFetchUrl(monthOffset, '/api/transacoes'));
@@ -477,74 +478,49 @@ function mesAbrev(mesNome) {
   return (mesNome || '').split(' ')[0].slice(0, 3);
 }
 
-// Paleta categórica de referência (skill de dataviz), par validado — hue fixa por série, nunca
-// trocada: slot 1 azul = Fixo, slot 2 laranja = Total.
+// Paleta categórica de referência (skill de dataviz), par validado — hue fixa por gráfico, nunca
+// trocada: slot 1 azul = Fixo, slot 2 laranja = Variável.
 const COR_FIXO = '#3987e5';
 const COR_VARIAVEL = '#d95926';
 
-// Gráfico de 2 linhas em SVG puro (sem lib), dos PRÓXIMOS N meses a partir do atual. A linha de
-// baixo é o Fixo (assinaturas ativas); a de cima é o Total (fixo + variável empilhado) em vez do
-// variável "solto" — assim a distância vertical entre as duas linhas É o variável daquele mês,
-// e as duas conversam entre si em vez de flutuarem desconectadas. Toque num mês mostra as duas
-// séries + a diferença entre elas.
+const PERIODO_LABELS = { h1: '1º semestre', h2: '2º semestre', ano: 'ano inteiro', proximos12: 'próximos 12 meses' };
+
+// Dois gráficos de 1 linha cada (SVG puro, sem lib). Quatro períodos: três fixos no calendário —
+// 1º semestre (jan-jun), 2º semestre (jul-dez), ano inteiro (jan-dez), sempre o mesmo range não
+// importa quando você olha — e um rolante, "Próximos 12 meses", que continua começando no mês
+// atual de propósito (útil pra ver uma visão contínua daqui pra frente, sem recorte de
+// calendário). Separados porque são naturezas diferentes de gasto, não dois jeitos de ver a mesma
+// coisa:
+// - Fixo: assinaturas ativas + compras já parceladas (Parcela Total > 1). Cada parcela já existe
+//   como linha própria no mês em que cai, então esse gráfico sobe sozinho quando você lança uma
+//   compra nova e cai sozinho quando uma parcela termina — sem precisar reconstruir nada.
+// - Variável: só compras à vista (sem parcelamento). Em meses futuros do período (ainda não
+//   vividos) tende a começar zerado, já que uma compra à vista só existe depois de acontecer.
 function renderEvolucaoContent(data) {
   const meses = data.meses || [];
+  const periodoLabel = PERIODO_LABELS[evolucaoPeriodo] || PERIODO_LABELS.h1;
   const filtroHtml = `
     <div class="filter-toggle">
-      <button class="${evolucaoMeses === 6 ? 'active' : ''}" onclick="setEvolucaoMeses(6)">Próximos 6 meses</button>
-      <button class="${evolucaoMeses === 12 ? 'active' : ''}" onclick="setEvolucaoMeses(12)">Próximos 12 meses</button>
+      <button class="${evolucaoPeriodo === 'h1' ? 'active' : ''}" onclick="setEvolucaoPeriodo('h1')">1º Semestre</button>
+      <button class="${evolucaoPeriodo === 'h2' ? 'active' : ''}" onclick="setEvolucaoPeriodo('h2')">2º Semestre</button>
+      <button class="${evolucaoPeriodo === 'ano' ? 'active' : ''}" onclick="setEvolucaoPeriodo('ano')">Ano Inteiro</button>
+      <button class="${evolucaoPeriodo === 'proximos12' ? 'active' : ''}" onclick="setEvolucaoPeriodo('proximos12')">Próximos 12 Meses</button>
     </div>`;
 
   if (meses.length < 2) {
-    return `<div class="section">${filtroHtml}<h2>📈 Fixo × Total</h2><p class="muted">Ainda não há meses suficientes pra montar o gráfico.</p></div>`;
+    return `<div class="section">${filtroHtml}<p class="muted">Ainda não há meses suficientes pra montar os gráficos.</p></div>`;
   }
 
   const n = meses.length;
-  const mediaFixo = meses.reduce((s, m) => s + m.fixoLiquido, 0) / n;
-  const mediaVariavel = meses.reduce((s, m) => s + m.variavelLiquido, 0) / n;
-  const maxValor = Math.max(...meses.map(m => m.fixoLiquido), ...meses.map(m => m.totalLiquido), 1);
+  const mediaFixo = meses.reduce((s, m) => s + m.fixoTotal, 0) / n;
+  const mediaVariavel = meses.reduce((s, m) => s + m.variavel, 0) / n;
 
-  const W = 320, H = 168, padL = 8, padR = 8, padT = 30, padB = 22;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const xAt = i => padL + (plotW * i) / (n - 1);
-  const yAt = v => padT + plotH - (v / (maxValor * 1.15)) * plotH;
-  const baseY = (padT + plotH).toFixed(1);
-
-  function serieHtml(campo, cor) {
-    const pts = meses.map((m, i) => ({ x: xAt(i), y: yAt(m[campo]), valor: m[campo] }));
-    const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-    const dots = pts.map((p, i) => `
-      <g class="chart-point" onclick="showChartTooltip(event, ${i})">
-        <circle cx="${p.x}" cy="${p.y}" r="11" fill="transparent"></circle>
-        <circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${cor}" stroke="#0b0f14" stroke-width="2"></circle>
-      </g>`).join('');
-    const ultimo = pts[n - 1];
-    // text-anchor="end": o último ponto é sempre o mais à direita — ancorar pela direita evita
-    // que o rótulo (largo, tipo "R$ 2.112,92") estoure a borda do gráfico.
-    const valorFinal = `<text x="${(ultimo.x + padR).toFixed(1)}" y="${Math.max(ultimo.y - 8, 11)}" text-anchor="end" font-size="10.5" font-weight="700" fill="${cor}">R$ ${formatBRL(ultimo.valor)}</text>`;
-    return { linePath, dots, valorFinal, pts };
-  }
-
-  const fixo = serieHtml('fixoLiquido', COR_FIXO);
-  // 'totalLiquido' (= fixo + variável) em vez de 'variavelLiquido' cru — é o que empilha a linha
-  // de cima sobre a de baixo.
-  const total = serieHtml('totalLiquido', COR_VARIAVEL);
-  // Em meses futuros sem variável ainda (comum — é só compromisso já sabido), as duas linhas
-  // convergem exatamente no último ponto e os dois rótulos de valor final caem no mesmo pixel,
-  // um por cima do outro e ilegível. Nesse caso mostra só o de cima (Total), que já é o mesmo
-  // número do Fixo quando elas coincidem.
-  const ultimoFixo = fixo.pts[n - 1].valor;
-  const ultimoTotal = total.pts[n - 1].valor;
-  const labelsConvergem = Math.abs(ultimoFixo - ultimoTotal) < Math.max(maxValor * 0.01, 1);
-  const labelsHtml = meses.map((m, i) =>
-    `<text x="${xAt(i)}" y="${H - 6}" text-anchor="middle" font-size="9" fill="#7d8590">${esc(mesAbrev(m.mesNome))}</text>`
-  ).join('');
-
-  // Guardado pro tooltip (por mês, não por série — toque em qualquer ponto daquele mês mostra
-  // as duas séries juntas, "um tooltip, todas as séries").
-  window.__evolucaoPontos = meses.map((m, i) => ({ ...m, cx: xAt(i), cy: yAt(Math.max(m.fixoLiquido, m.totalLiquido)) }));
+  const fixoChart = buildEvolucaoChart(meses, 'fixoTotal', COR_FIXO, 'fixo');
+  const variavelChart = buildEvolucaoChart(meses, 'variavel', COR_VARIAVEL, 'variavel');
+  window.__evolucaoSeries = { fixo: fixoChart.pontos, variavel: variavelChart.pontos };
 
   return `
+    ${filtroHtml}
     <div class="cards" style="margin-bottom:18px;">
       <div class="card">
         <div class="card-label"><span class="dot" style="background:${COR_FIXO};"></span>Fixo médio/mês</div>
@@ -557,42 +533,76 @@ function renderEvolucaoContent(data) {
     </div>
 
     <div class="section">
-      ${filtroHtml}
-      <h2>📈 Fixo × Total — próximos ${n} meses</h2>
-      <div class="chart-legend">
-        <span><i style="background:${COR_FIXO};"></i>Fixo (assinaturas)</span>
-        <span><i style="background:${COR_VARIAVEL};"></i>Total (fixo + variável)</span>
-      </div>
-      <div class="chart-wrap" id="chart-wrap">
-        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
-          <line x1="${padL}" y1="${baseY}" x2="${W - padR}" y2="${baseY}" stroke="#21262d" stroke-width="1"></line>
-          <path d="${fixo.linePath}" fill="none" stroke="${COR_FIXO}" stroke-width="2"></path>
-          <path d="${total.linePath}" fill="none" stroke="${COR_VARIAVEL}" stroke-width="2"></path>
-          ${labelsConvergem ? '' : fixo.valorFinal}
-          ${total.valorFinal}
-          ${fixo.dots}
-          ${total.dots}
-          ${labelsHtml}
-        </svg>
-        <div class="chart-tooltip" id="chart-tooltip"></div>
-      </div>
-      <p class="muted" style="margin-top:8px;">A linha de cima é o total (fixo + variável) — a distância entre as duas linhas é o quanto foi variável naquele mês. Toque num ponto pra ver os valores.</p>
+      <h2>📌 Fixo — parcelas + assinaturas — ${periodoLabel}</h2>
+      ${fixoChart.svgHtml}
+      <p class="muted" style="margin-top:8px;">Assinaturas ativas + compras já parceladas. Sobe quando você lança uma compra nova, cai sozinho quando uma parcela termina. Toque num ponto pra ver o valor.</p>
+    </div>
+
+    <div class="section">
+      <h2>🔀 Variável — compras à vista — ${periodoLabel}</h2>
+      ${variavelChart.svgHtml}
+      <p class="muted" style="margin-top:8px;">Só compras à vista, sem parcelamento. Meses do período ainda não vividos começam zerados até você lançar algo. Toque num ponto pra ver o valor.</p>
     </div>`;
 }
 
-function setEvolucaoMeses(n) {
-  evolucaoMeses = n;
+// Monta um gráfico de linha única (path + pontos tocáveis + rótulo no primeiro e no último mês +
+// eixo de meses). Devolve o HTML e os pontos em coordenadas de tela, pro tooltip usar depois.
+function buildEvolucaoChart(meses, campo, cor, idSuffix) {
+  const n = meses.length;
+  const maxValor = Math.max(...meses.map(m => m[campo]), 1);
+  const W = 320, H = 150, padL = 8, padR = 8, padT = 26, padB = 22;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const xAt = i => padL + (plotW * i) / (n - 1);
+  const yAt = v => padT + plotH - (v / (maxValor * 1.15)) * plotH;
+  const baseY = (padT + plotH).toFixed(1);
+
+  const pts = meses.map((m, i) => ({ x: xAt(i), y: yAt(m[campo]), valor: m[campo], mesNome: m.mesNome }));
+  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const dots = pts.map((p, i) => `
+    <g class="chart-point" onclick="showEvolucaoTooltip(event, ${i}, '${idSuffix}')">
+      <circle cx="${p.x}" cy="${p.y}" r="11" fill="transparent"></circle>
+      <circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${cor}" stroke="#0b0f14" stroke-width="2"></circle>
+    </g>`).join('');
+  const primeiro = pts[0];
+  const ultimo = pts[n - 1];
+  // Rótulo no primeiro E no último mês do período (não só no último) — o período é fixo agora,
+  // então o primeiro ponto pode ser passado, presente ou futuro dependendo de quando você olha;
+  // mostrar os dois extremos deixa a tendência do período legível de cara.
+  const labelPrimeiro = `<text x="${primeiro.x.toFixed(1)}" y="${Math.max(primeiro.y - 8, 11)}" text-anchor="start" font-size="10.5" font-weight="700" fill="${cor}">R$ ${formatBRL(primeiro.valor)}</text>`;
+  const labelUltimo = `<text x="${(ultimo.x + padR).toFixed(1)}" y="${Math.max(ultimo.y - 8, 11)}" text-anchor="end" font-size="10.5" font-weight="700" fill="${cor}">R$ ${formatBRL(ultimo.valor)}</text>`;
+  const labelsHtml = meses.map((m, i) =>
+    `<text x="${xAt(i)}" y="${H - 6}" text-anchor="middle" font-size="9" fill="#7d8590">${esc(mesAbrev(m.mesNome))}</text>`
+  ).join('');
+
+  const svgHtml = `
+    <div class="chart-wrap" id="chart-wrap-${idSuffix}">
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+        <line x1="${padL}" y1="${baseY}" x2="${W - padR}" y2="${baseY}" stroke="#21262d" stroke-width="1"></line>
+        <path d="${linePath}" fill="none" stroke="${cor}" stroke-width="2"></path>
+        ${labelPrimeiro}
+        ${labelUltimo}
+        ${dots}
+        ${labelsHtml}
+      </svg>
+      <div class="chart-tooltip" id="chart-tooltip-${idSuffix}"></div>
+    </div>`;
+
+  return { svgHtml, pontos: pts };
+}
+
+function setEvolucaoPeriodo(periodo) {
+  evolucaoPeriodo = periodo;
   loadActiveTab();
 }
 
-// Posiciona o tooltip compartilhado em cima do ponto tocado (coordenadas do SVG escaladas pro
-// tamanho real renderizado, já que o viewBox é fixo mas o SVG estica pra largura da tela). Mostra
-// as DUAS séries daquele mês juntas — "um tooltip só, todas as séries", não uma por linha.
-function showChartTooltip(evt, idx) {
+// Posiciona o tooltip do gráfico tocado (coordenadas do SVG escaladas pro tamanho real renderizado,
+// já que o viewBox é fixo mas o SVG estica pra largura da tela). "which" = 'fixo' ou 'variavel',
+// cada gráfico tem seu próprio wrap/tooltip/pontos — tocar num não mexe no outro.
+function showEvolucaoTooltip(evt, idx, which) {
   evt.stopPropagation();
-  const pontos = window.__evolucaoPontos;
-  const wrap = document.getElementById('chart-wrap');
-  const tooltip = document.getElementById('chart-tooltip');
+  const pontos = window.__evolucaoSeries && window.__evolucaoSeries[which];
+  const wrap = document.getElementById(`chart-wrap-${which}`);
+  const tooltip = document.getElementById(`chart-tooltip-${which}`);
   if (!pontos || !pontos[idx] || !wrap || !tooltip) return;
 
   const p = pontos[idx];
@@ -600,16 +610,13 @@ function showChartTooltip(evt, idx) {
   const svgRect = svg.getBoundingClientRect();
   const wrapRect = wrap.getBoundingClientRect();
   const scaleX = svgRect.width / 320;
-  const scaleY = svgRect.height / 168;
+  const scaleY = svgRect.height / 150;
 
-  tooltip.innerHTML = `<span class="t-mes">${esc(p.mesNome)}</span><br>` +
-    `<span class="t-key" style="border-color:${COR_FIXO};"></span><span class="t-valor">R$ ${formatBRL(p.fixoLiquido)}</span> fixo<br>` +
-    `<span class="t-key" style="border-color:${COR_VARIAVEL};"></span><span class="t-valor">R$ ${formatBRL(p.totalLiquido)}</span> total<br>` +
-    `<span style="display:inline-block; width:10px;"></span><span class="t-valor" style="opacity:0.75;">R$ ${formatBRL(p.variavelLiquido)}</span> <span style="opacity:0.75;">variável</span>`;
+  tooltip.innerHTML = `<span class="t-mes">${esc(p.mesNome)}</span><br><span class="t-valor">R$ ${formatBRL(p.valor)}</span>`;
   tooltip.classList.add('visible');
 
-  const top = (p.cy * scaleY) + (svgRect.top - wrapRect.top) - 12;
-  let left = (p.cx * scaleX) + (svgRect.left - wrapRect.left);
+  const top = (p.y * scaleY) + (svgRect.top - wrapRect.top) - 12;
+  let left = (p.x * scaleX) + (svgRect.left - wrapRect.left);
   // Trava horizontalmente pra não vazar do container — o tooltip é centralizado no ponto por
   // padrão (transform: translateX(-50%)), o que estoura a borda quando o ponto é o primeiro/último.
   const half = tooltip.offsetWidth / 2;
@@ -621,8 +628,7 @@ function showChartTooltip(evt, idx) {
 }
 
 document.addEventListener('click', () => {
-  const tooltip = document.getElementById('chart-tooltip');
-  if (tooltip) tooltip.classList.remove('visible');
+  document.querySelectorAll('.chart-tooltip').forEach(t => t.classList.remove('visible'));
 });
 
 function switchTab(tab) {
