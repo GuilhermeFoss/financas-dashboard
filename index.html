@@ -254,8 +254,39 @@ async function loadActiveTab() {
       renderShell(data, content);
     }
   } catch (e) {
-    renderSetup('Erro ao buscar dados: ' + e.message + ' — confira a URL (o token pode ter mudado).');
+    renderFetchError(e.message);
   }
+}
+
+// Menu inferior fixo — compartilhado entre a casca normal e a tela de erro (pra dar pro usuário
+// como trocar de aba mesmo quando uma delas falhou, o que já ajuda a diagnosticar se é uma aba
+// só ou o Worker inteiro fora do ar).
+function bottomNavHtml() {
+  return `
+    <div class="bottom-nav">
+      <button class="${activeTab === 'resumo' ? 'active' : ''}" onclick="switchTab('resumo')"><span class="icon">📊</span>Resumo</button>
+      <button class="${activeTab === 'transacoes' ? 'active' : ''}" onclick="switchTab('transacoes')"><span class="icon">🧾</span>Transações</button>
+      <button class="${activeTab === 'pessoas' ? 'active' : ''}" onclick="switchTab('pessoas')"><span class="icon">🤝</span>Pessoas</button>
+      <button class="${activeTab === 'evolucao' ? 'active' : ''}" onclick="switchTab('evolucao')"><span class="icon">📈</span>Evolução</button>
+    </div>`;
+}
+
+// Erro ao buscar uma aba (rede, timeout, erro do Worker) — mostra inline com um botão de
+// "tentar de novo" e mantém o menu inferior. Antes disso caía direto na tela de configurar URL,
+// o que "deslogava" o usuário (parecia que o token tinha expirado) mesmo quando a URL salva
+// continuava perfeitamente válida — só a tentativa de buscar dados é que falhou.
+function renderFetchError(message) {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="page">
+      <div class="setup" style="margin-top:70px;">
+        <h1>⚠️ Não consegui carregar</h1>
+        <p>${esc(message)}</p>
+        <button onclick="loadActiveTab()">Tentar de novo</button>
+        <p class="error" style="margin-top:14px; cursor:pointer; text-decoration:underline;" onclick="reconfigure()">Reconfigurar URL/token</p>
+      </div>
+    </div>
+    ${bottomNavHtml()}`;
 }
 
 // Casca comum a todas as abas: cabeçalho, navegação de mês, conteúdo da aba, menu inferior.
@@ -288,12 +319,7 @@ function renderShell(data, contentHtml) {
       ${contentHtml}
     </div>
 
-    <div class="bottom-nav">
-      <button class="${activeTab === 'resumo' ? 'active' : ''}" onclick="switchTab('resumo')"><span class="icon">📊</span>Resumo</button>
-      <button class="${activeTab === 'transacoes' ? 'active' : ''}" onclick="switchTab('transacoes')"><span class="icon">🧾</span>Transações</button>
-      <button class="${activeTab === 'pessoas' ? 'active' : ''}" onclick="switchTab('pessoas')"><span class="icon">🤝</span>Pessoas</button>
-      <button class="${activeTab === 'evolucao' ? 'active' : ''}" onclick="switchTab('evolucao')"><span class="icon">📈</span>Evolução</button>
-    </div>`;
+    ${bottomNavHtml()}`;
 }
 
 function renderResumoContent(data) {
